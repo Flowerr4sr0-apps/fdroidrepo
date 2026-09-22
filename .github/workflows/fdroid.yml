@@ -1,4 +1,3 @@
-```yaml
 name: Deploy F-Droid Repo
 
 on:
@@ -97,4 +96,3 @@ jobs:
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
-```
