@@ -14,19 +14,64 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Fetch Releases and Generate Index
-        uses: flashsoft/fdroid-repository-action@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
+          python-version: '3.x'
+
+      - name: Install F-Droid Server Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fdroidserver
+
+      - name: Create Repo Folders
+        run: |
+          mkdir -p public/repo
+          mkdir -p public/metadata
+
+      - name: Scrape APKs from GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Native GitHub CLI fetches your releases and pulls the APKs
+          gh release list --limit 100 | while read -r line; do
+            tag=$(echo "$line" | cut -f1)
+            gh release download "$tag" --pattern "*.apk" --dir public/repo --clobber || true
+          done
+
+      - name: Initialize Dummy Keystore
+        run: |
+          # Safely auto-generates a temporary signing key right on the runner
+          keytool -genkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias fdroid -keystore keystore.p12 -storetype PKCS12 \
+            -storepass temporarypassword -keypass temporarypassword \
+            -dname "CN=F-Droid, O=Simple Repo, C=US"
+
+      - name: Generate F-Droid Config
+        run: |
+          cat <<EOF > public/config.yml
+          repo_url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo
           repo_name: "${{ github.repository_owner }} F-Droid Repo"
           repo_description: "Open-source apps delivered straight from GitHub Releases."
-          base_url: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          keystore: ../keystore.p12
+          keystorepass: "temporarypassword"
+          keypass: "temporarypassword"
+          repo_keyalias: fdroid
+          EOF
+
+      - name: Build F-Droid Index Maps
+        run: |
+          cd public
+          fdroid update --create-metadata --verbose
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
@@ -34,5 +79,6 @@ jobs:
           path: 'public/'
 
       - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
         uses: actions/deploy-pages@v4
         
