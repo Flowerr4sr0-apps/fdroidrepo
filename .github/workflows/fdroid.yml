@@ -1,3 +1,4 @@
+```yaml
 name: Deploy F-Droid Repo
 
 on:
@@ -28,7 +29,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fdroidserver
 
-      - name: Create repository directories
+      - name: Create F-Droid repository
         run: |
           mkdir -p public/repo
           mkdir -p public/metadata
@@ -42,7 +43,7 @@ jobs:
             --json tagName,isDraft \
             --jq '.[] | select(.isDraft == false) | .tagName' |
           while read -r tag; do
-            echo "Downloading APKs from $tag..."
+            echo "Downloading APKs from release: $tag"
 
             gh release download "$tag" \
               --pattern "*.apk" \
@@ -50,18 +51,25 @@ jobs:
               --clobber || true
           done
 
-      - name: Create F-Droid config
+      - name: Create F-Droid metadata
         run: |
           cat > public/config.yml <<EOF
           repo_url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo
           repo_name: "${{ github.repository_owner }} F-Droid Repo"
           repo_description: "Open-source apps delivered straight from GitHub Releases."
+
+          archive_older: 0
           EOF
 
       - name: Generate F-Droid index
         working-directory: public
         run: |
           fdroid update --create-metadata --verbose
+
+      - name: Verify repository
+        run: |
+          echo "Repository contents:"
+          find public -maxdepth 3 -type f -print
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -73,3 +81,4 @@ jobs:
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
+```
