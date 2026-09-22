@@ -38,7 +38,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Native GitHub CLI fetches your releases and pulls the APKs
           gh release list --limit 100 | while read -r line; do
             tag=$(echo "$line" | cut -f1)
             gh release download "$tag" --pattern "*.apk" --dir public/repo --clobber || true
@@ -46,7 +45,6 @@ jobs:
 
       - name: Initialize Dummy Keystore
         run: |
-          # Safely auto-generates a temporary signing key right on the runner
           keytool -genkey -keyalg RSA -keysize 2048 -validity 10000 \
             -alias fdroid -keystore keystore.p12 -storetype PKCS12 \
             -storepass temporarypassword -keypass temporarypassword \
@@ -79,6 +77,5 @@ jobs:
           path: 'public/'
 
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
         uses: actions/deploy-pages@v4
         
