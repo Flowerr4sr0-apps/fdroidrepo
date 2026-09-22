@@ -1,3 +1,4 @@
+```yaml
 name: Deploy F-Droid Repo
 
 on:
@@ -25,13 +26,14 @@ jobs:
 
       - name: Install F-Droid Server
         run: |
-          sudo apt-get update
-          sudo apt-get install -y fdroidserver
+          python -m pip install --upgrade pip
+          python -m pip install fdroidserver
 
-      - name: Create F-Droid repository
+      - name: Create repository structure
         run: |
           mkdir -p public/repo
           mkdir -p public/metadata
+          mkdir -p public/repo/icons
 
       - name: Download APKs from GitHub Releases
         env:
@@ -42,7 +44,7 @@ jobs:
             --json tagName,isDraft \
             --jq '.[] | select(.isDraft == false) | .tagName' |
           while read -r tag; do
-            echo "Downloading APKs from release: $tag"
+            echo "Downloading APKs from $tag..."
 
             gh release download "$tag" \
               --pattern "*.apk" \
@@ -50,13 +52,28 @@ jobs:
               --clobber || true
           done
 
-      - name: Create F-Droid metadata
+      - name: Create repository icon
+        run: |
+          python - <<'PY'
+          import base64
+          from pathlib import Path
+
+          # 1x1 transparent PNG
+          png = base64.b64decode(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+              "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+          )
+
+          Path("public/repo/icons/icon.png").write_bytes(png)
+          PY
+
+      - name: Create F-Droid configuration
         run: |
           cat > public/config.yml <<EOF
           repo_url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo
           repo_name: "${{ github.repository_owner }} F-Droid Repo"
           repo_description: "Open-source apps delivered straight from GitHub Releases."
-
+          repo_icon: "repo/icons/icon.png"
           archive_older: 0
           EOF
 
@@ -67,8 +84,8 @@ jobs:
 
       - name: Verify repository
         run: |
-          echo "Repository contents:"
-          find public -maxdepth 3 -type f -print
+          echo "Generated repository:"
+          find public -maxdepth 4 -type f -print
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -80,4 +97,4 @@ jobs:
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
-
+```
