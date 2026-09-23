@@ -30,9 +30,8 @@ jobs:
 
       - name: Create repository structure
         run: |
-          mkdir -p public/repo
-          mkdir -p public/metadata
           mkdir -p public/repo/icons
+          mkdir -p public/metadata
 
       - name: Download APKs from GitHub Releases
         env:
@@ -51,13 +50,22 @@ jobs:
               --clobber || true
           done
 
+      - name: Create F-Droid signing key
+        working-directory: public
+        run: |
+          if [ ! -f keystore.p12 ]; then
+            echo "Creating F-Droid signing key..."
+            fdroid update --create-key
+          else
+            echo "F-Droid signing key already exists."
+          fi
+
       - name: Create repository icon
         run: |
           python - <<'PY'
           import base64
           from pathlib import Path
 
-          # 1x1 transparent PNG
           png = base64.b64decode(
               "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
               "+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -67,13 +75,18 @@ jobs:
           PY
 
       - name: Create F-Droid configuration
+        working-directory: public
         run: |
-          cat > public/config.yml <<EOF
+          cat > config.yml <<EOF
           repo_url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo
           repo_name: "${{ github.repository_owner }} F-Droid Repo"
           repo_description: "Open-source apps delivered straight from GitHub Releases."
           repo_icon: "repo/icons/icon.png"
           archive_older: 0
+          keystore: keystore.p12
+          keystorepass: ""
+          keypass: ""
+          repo_keyalias: fdroid
           EOF
 
       - name: Generate F-Droid index
