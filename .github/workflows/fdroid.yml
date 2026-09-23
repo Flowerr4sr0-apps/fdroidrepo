@@ -1,3 +1,4 @@
+
 name: Deploy F-Droid Repo
 
 on:
@@ -28,7 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install fdroidserver
 
-      - name: Create repository structure
+      - name: Create repository directories
         run: |
           mkdir -p public/repo/icons
           mkdir -p public/metadata
@@ -42,7 +43,7 @@ jobs:
             --json tagName,isDraft \
             --jq '.[] | select(.isDraft == false) | .tagName' |
           while read -r tag; do
-            echo "Downloading APKs from $tag..."
+            echo "Downloading APKs from release: $tag"
 
             gh release download "$tag" \
               --pattern "*.apk" \
@@ -50,14 +51,29 @@ jobs:
               --clobber || true
           done
 
-      - name: Create F-Droid signing key
+      - name: Create repository signing key
         working-directory: public
+        env:
+          FDROID_KEY_STORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASSWORD }}
+          FDROID_KEY_PASS: ${{ secrets.FDROID_KEY_PASSWORD }}
         run: |
+          if [ -z "$FDROID_KEY_STORE_PASS" ] || [ -z "$FDROID_KEY_PASS" ]; then
+            echo "::error::FDROID_KEYSTORE_PASSWORD and FDROID_KEY_PASSWORD GitHub Secrets must be configured."
+            exit 1
+          fi
+
           if [ ! -f keystore.p12 ]; then
-            echo "Creating F-Droid signing key..."
-            fdroid update --create-key
-          else
-            echo "F-Droid signing key already exists."
+            keytool \
+              -genkeypair \
+              -alias fdroid \
+              -keyalg RSA \
+              -keysize 4096 \
+              -validity 10000 \
+              -storetype PKCS12 \
+              -keystore keystore.p12 \
+              -storepass "$FDROID_KEY_STORE_PASS" \
+              -keypass "$FDROID_KEY_PASS" \
+              -dname "CN=F-Droid Repository, O=${{ github.repository_owner }}"
           fi
 
       - name: Create repository icon
@@ -76,6 +92,9 @@ jobs:
 
       - name: Create F-Droid configuration
         working-directory: public
+        env:
+          FDROID_KEY_STORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASSWORD }}
+          FDROID_KEY_PASS: ${{ secrets.FDROID_KEY_PASSWORD }}
         run: |
           cat > config.yml <<EOF
           repo_url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo
@@ -84,25 +103,32 @@ jobs:
           repo_icon: "repo/icons/icon.png"
           archive_older: 0
           keystore: keystore.p12
-          keystorepass: ""
-          keypass: ""
+          keystorepass: $FDROID_KEY_STORE_PASS
+          keypass: $FDROID_KEY_PASS
           repo_keyalias: fdroid
           EOF
 
       - name: Generate F-Droid index
         working-directory: public
+        env:
+          FDROID_KEY_STORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASSWORD }}
+          FDROID_KEY_PASS: ${{ secrets.FDROID_KEY_PASSWORD }}
         run: |
           fdroid update --create-metadata --verbose
 
-      - name: Verify repository
+      - name: Verify generated repository
         run: |
-          echo "Generated repository:"
-          find public -maxdepth 4 -type f -print
+          echo "=== Repository files ==="
+          find public/repo -maxdepth 3 -type f -print
+
+          echo
+          echo "=== Metadata ==="
+          find public/metadata -maxdepth 2 -type f -print
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload GitHub Pages artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
