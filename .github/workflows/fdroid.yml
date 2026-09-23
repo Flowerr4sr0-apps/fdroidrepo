@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      FDROID_KEY_STORE_PASS: "fdroid-temporary-password"
-      FDROID_KEY_PASS: "fdroid-temporary-password"
+      FDROID_KEY_STORE_PASS: "fdroid-temporary-keystore-password"
+      FDROID_KEY_PASS: "fdroid-temporary-key-password"
 
     steps:
       - name: Checkout repository
@@ -34,6 +34,7 @@ jobs:
 
       - name: Create repository directories
         run: |
+          rm -rf public
           mkdir -p public/repo/icons
           mkdir -p public/metadata
 
@@ -46,7 +47,9 @@ jobs:
             --json tagName,isDraft \
             --jq '.[] | select(.isDraft == false) | .tagName' |
           while read -r tag; do
-            echo "Downloading APKs from $tag..."
+            [ -z "$tag" ] && continue
+
+            echo "Downloading APKs from release: $tag"
 
             gh release download "$tag" \
               --pattern "*.apk" \
@@ -54,20 +57,40 @@ jobs:
               --clobber || true
           done
 
-      - name: Create F-Droid signing key
+      - name: Check downloaded APKs
+        run: |
+          echo "=== APK files ==="
+          find public/repo -maxdepth 1 -type f -name "*.apk" -print
+
+          if ! find public/repo -maxdepth 1 -type f -name "*.apk" | grep -q .; then
+            echo "No APK files were downloaded."
+            exit 1
+          fi
+
+      - name: Create F-Droid signing keystore
         working-directory: public
         run: |
+          rm -f keystore.p12
+
           keytool \
             -genkeypair \
             -alias fdroid \
             -keyalg RSA \
-            -keysize 4096 \
+            -keysize 2048 \
             -validity 10000 \
             -storetype PKCS12 \
             -keystore keystore.p12 \
             -storepass "$FDROID_KEY_STORE_PASS" \
             -keypass "$FDROID_KEY_PASS" \
             -dname "CN=F-Droid Repository, O=${{ github.repository_owner }}"
+
+          chmod 600 keystore.p12
+
+          echo "=== Keystore ==="
+          keytool \
+            -list \
+            -keystore keystore.p12 \
+            -storepass "$FDROID_KEY_STORE_PASS"
 
       - name: Create repository icon
         run: |
@@ -83,32 +106,71 @@ jobs:
           Path("public/icon.png").write_bytes(png)
           PY
 
+          file public/icon.png
+
       - name: Create F-Droid configuration
         working-directory: public
         run: |
-          cat > config.yml <<EOF
+          cat > config.yml <<'EOF'
           repo_url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo
           repo_name: "${{ github.repository_owner }} F-Droid Repo"
           repo_description: "Open-source apps delivered straight from GitHub Releases."
           repo_icon: "icon.png"
           archive_older: 0
+
           keystore: keystore.p12
-          keystorepass: env:FDROID_KEY_STORE_PASS
-          keypass: env:FDROID_KEY_PASS
+          keystorepass: {env: FDROID_KEY_STORE_PASS}
+          keypass: {env: FDROID_KEY_PASS}
           repo_keyalias: fdroid
           EOF
 
           chmod 600 config.yml
+
+          echo "=== config.yml ==="
+          sed \
+            -e 's/FDROID_KEY_STORE_PASS/[hidden]/g' \
+            -e 's/FDROID_KEY_PASS/[hidden]/g' \
+            config.yml
+
+      - name: Verify signing key
+        working-directory: public
+        run: |
+          echo "=== Repository signing certificate ==="
+
+          keytool \
+            -exportcert \
+            -rfc \
+            -alias fdroid \
+            -keystore keystore.p12 \
+            -storepass "$FDROID_KEY_STORE_PASS" \
+            > repo-cert.pem
+
+          openssl x509 \
+            -in repo-cert.pem \
+            -noout \
+            -subject \
+            -fingerprint \
+            -sha256
 
       - name: Generate F-Droid index
         working-directory: public
         run: |
           fdroid update --create-metadata --verbose
 
-      - name: Verify repository
+      - name: Verify generated repository
         run: |
           echo "=== Generated repository ==="
-          find public -maxdepth 4 -type f -print
+          find public -maxdepth 4 -type f -print | sort
+
+          echo
+          echo "=== Repository files ==="
+          ls -lah public/repo
+
+          echo
+          echo "=== F-Droid indexes ==="
+          find public/repo -maxdepth 1 \
+            \( -name "index*" -o -name "*.jar" \) \
+            -print
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
